@@ -1,0 +1,17 @@
+# Build outputs
+dist
+node_modules
+coverage
+
+# Database files
+*.db
+*.sqlite
+
+# Lock files
+pnpm-lock.yaml
+package-lock.json
+yarn.lock
+
+# Generated files
+*.log
+.env

@@ -1,15 +1,16 @@
 import {
-  WebSocketGateway,
-  SubscribeMessage,
-  MessageBody,
   ConnectedSocket,
-  WebSocketServer,
+  MessageBody,
   OnGatewayConnection,
   OnGatewayDisconnect,
+  SubscribeMessage,
+  WebSocketGateway,
+  WebSocketServer,
 } from '@nestjs/websockets';
+import { Logger } from '@nestjs/common';
 import { Server, Socket } from 'socket.io';
 import { GameService } from './game.service';
-import { PlayersService } from '../players/players.service';
+import { PlayersService } from '@players/players.service';
 import { JoinGameDto } from './dto/join-game.dto';
 import { PlayCardDto } from './dto/play-card.dto';
 
@@ -20,38 +21,48 @@ import { PlayCardDto } from './dto/play-card.dto';
   },
 })
 export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
+  private readonly logger = new Logger(GameGateway.name);
+
   @WebSocketServer()
-  server: Server;
+  server!: Server;
 
   constructor(
     private readonly gameService: GameService,
     private readonly playersService: PlayersService,
   ) {}
 
-  async handleConnection(client: Socket) {
-    console.log(`Client connected: ${client.id}`);
+  handleConnection(client: Socket): void {
+    this.logger.log(`Client connected: ${client.id}`);
   }
 
-  async handleDisconnect(client: Socket) {
-    console.log(`Client disconnected: ${client.id}`);
-    // Buscar jugador por socketId y marcarlo como desconectado
+  async handleDisconnect(client: Socket): Promise<void> {
+    this.logger.log(`Client disconnected: ${client.id}`);
+    // Buscar jugador por socketId y eliminarlo
     const player = await this.playersService.findBySocketId(client.id);
     if (player) {
-      await this.playersService.setReady(player.id, false);
+      const result = await this.gameService.handlePlayerDisconnect(player.id);
+
       this.server.to(`game-${player.gameId}`).emit('playerDisconnected', {
         playerId: player.id,
         nickname: player.nickname,
+        nextTurnPlayerId: result.nextTurnPlayerId,
       });
+
+      if (result.gameFinished) {
+        this.server.to(`game-${player.gameId}`).emit('gameFinished', {
+          winnerId: result.winnerId ?? null,
+          reason: 'insufficient_players',
+        });
+      }
     }
   }
 
   @SubscribeMessage('createGame')
   async handleCreateGame(
     @MessageBody() data: { maxPlayers?: number },
-    @ConnectedSocket() client: Socket,
-  ) {
+  ): Promise<{ event: string; data: unknown }> {
     const game = await this.gameService.create({
-      maxPlayers: data.maxPlayers || 2,
+      maxPlayers: data.maxPlayers ?? 2,
     });
     return { event: 'gameCreated', data: game };
   }
@@ -60,7 +71,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
   async handleJoinGame(
     @MessageBody() joinGameDto: JoinGameDto,
     @ConnectedSocket() client: Socket,
-  ) {
+  ): Promise<{ event: string; data: unknown }> {
     try {
       const game = await this.gameService.findOne(joinGameDto.gameId);
       const existingPlayers = await this.playersService.findByGameId(game.id);
@@ -75,7 +86,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
         socketId: client.id,
       });
 
-      client.join(`game-${game.id}`);
+      void client.join(`game-${game.id}`);
 
       // Notificar a todos en la sala
       this.server.to(`game-${game.id}`).emit('playerJoined', {
@@ -86,15 +97,17 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
       return { event: 'joinedGame', data: { game, player } };
     } catch (error) {
-      return { event: 'error', data: { message: error.message } };
+      const message =
+        error instanceof Error ? error.message : 'Unknown error occurred';
+      this.logger.error(`Error joining game: ${message}`, error);
+      return { event: 'error', data: { message } };
     }
   }
 
   @SubscribeMessage('playerReady')
   async handlePlayerReady(
     @MessageBody() data: { gameId: number; playerId: number },
-    @ConnectedSocket() client: Socket,
-  ) {
+  ): Promise<{ event: string; data: unknown }> {
     await this.playersService.setReady(data.playerId, true);
     const players = await this.playersService.findByGameId(data.gameId);
     const allReady = players.every((p) => p.isReady);
@@ -107,7 +120,9 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     // Si todos están listos, iniciar el juego
     if (allReady && players.length >= 2) {
       const game = await this.gameService.startGame(data.gameId);
-      const updatedPlayers = await this.playersService.findByGameId(data.gameId);
+      const updatedPlayers = await this.playersService.findByGameId(
+        data.gameId,
+      );
 
       this.server.to(`game-${data.gameId}`).emit('gameStarted', {
         game,
@@ -121,45 +136,43 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @SubscribeMessage('playCard')
   async handlePlayCard(
     @MessageBody() playCardDto: PlayCardDto,
-    @ConnectedSocket() client: Socket,
-  ) {
+  ): Promise<{ event: string; data: unknown }> {
     try {
-      const result = await this.gameService.playRound(
+      const result = await this.gameService.playRoundMultiplayer(
         playCardDto.gameId,
         playCardDto.playerId,
         playCardDto.cardId,
         playCardDto.selectedAttribute,
       );
 
-      // Notificar a todos en la sala del resultado
+      // Emitir resultado de ronda a todos
       this.server.to(`game-${playCardDto.gameId}`).emit('roundResult', {
-        round: result.round,
-        winner: result.winner,
-        card1: result.card1,
-        card2: result.card2,
+        playedCards: result.roundResult.playedCards,
+        winnerId: result.roundResult.winnerId,
+        nextTurnPlayerId: result.nextTurnPlayerId,
         selectedAttribute: playCardDto.selectedAttribute,
       });
 
-      // Verificar si el juego terminó
-      const game = await this.gameService.findOne(playCardDto.gameId);
-      if (game.status === 'finished') {
+      // Si terminó la partida
+      if (result.gameFinished) {
         this.server.to(`game-${playCardDto.gameId}`).emit('gameFinished', {
-          winnerId: game.winnerId,
-          game,
+          winnerId: result.finalWinnerId,
         });
       }
 
-      return { event: 'cardPlayed', data: result };
+      return { event: 'cardPlayed', data: { success: true } };
     } catch (error) {
-      return { event: 'error', data: { message: error.message } };
+      const message =
+        error instanceof Error ? error.message : 'Unknown error occurred';
+      this.logger.error(`Error playing card: ${message}`, error);
+      return { event: 'error', data: { message } };
     }
   }
 
   @SubscribeMessage('getGameState')
   async handleGetGameState(
     @MessageBody() data: { gameId: number },
-    @ConnectedSocket() client: Socket,
-  ) {
+  ): Promise<{ event: string; data: unknown }> {
     const game = await this.gameService.findOne(data.gameId);
     const players = await this.playersService.findByGameId(data.gameId);
     return { event: 'gameState', data: { game, players } };
@@ -169,9 +182,9 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
   async handleLeaveGame(
     @MessageBody() data: { gameId: number; playerId: number },
     @ConnectedSocket() client: Socket,
-  ) {
+  ): Promise<{ event: string; data: unknown }> {
     await this.playersService.remove(data.playerId);
-    client.leave(`game-${data.gameId}`);
+    void client.leave(`game-${data.gameId}`);
 
     this.server.to(`game-${data.gameId}`).emit('playerLeft', {
       playerId: data.playerId,

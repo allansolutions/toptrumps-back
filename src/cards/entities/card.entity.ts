@@ -1,37 +1,37 @@
-import { Entity, PrimaryGeneratedColumn, Column } from 'typeorm';
+import { Column, Entity, PrimaryGeneratedColumn } from 'typeorm';
 
 @Entity('cards')
 export class Card {
   @PrimaryGeneratedColumn()
-  id: number;
+  id!: number;
 
   @Column()
-  name: string;
+  name!: string;
 
   @Column({ nullable: true })
-  image: string;
+  image!: string;
 
   @Column({ type: 'int' })
-  power: number;
+  power!: number;
 
   @Column({ type: 'int' })
-  speed: number;
+  speed!: number;
 
   @Column({ type: 'int' })
-  intelligence: number;
+  intelligence!: number;
 
   @Column({ type: 'int' })
-  defense: number;
+  defense!: number;
 
   @Column({ type: 'int' })
-  agility: number;
+  agility!: number;
 
   @Column({ type: 'text', nullable: true })
-  description: string;
+  description!: string;
 
   @Column({ default: 'common' })
-  rarity: string; // common, rare, epic, legendary
+  rarity!: string; // common, rare, epic, legendary
 
   @Column({ type: 'datetime', default: () => 'CURRENT_TIMESTAMP' })
-  createdAt: Date;
+  createdAt!: Date;
 }

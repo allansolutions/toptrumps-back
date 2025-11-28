@@ -1,12 +1,12 @@
 import {
-  Entity,
-  PrimaryGeneratedColumn,
   Column,
-  OneToMany,
   CreateDateColumn,
+  Entity,
+  OneToMany,
+  PrimaryGeneratedColumn,
   UpdateDateColumn,
 } from 'typeorm';
-import { Player } from '../../players/entities/player.entity';
+import { Player } from '@players/entities/player.entity';
 import { GameRound } from './game-round.entity';
 
 export enum GameStatus {
@@ -18,33 +18,36 @@ export enum GameStatus {
 @Entity('games')
 export class Game {
   @PrimaryGeneratedColumn()
-  id: number;
+  id!: number;
 
   @Column({
     type: 'text',
     enum: GameStatus,
     default: GameStatus.WAITING,
   })
-  status: GameStatus;
+  status!: GameStatus;
 
   @Column({ nullable: true })
-  winnerId: number;
+  winnerId!: number;
 
   @Column({ default: 2 })
-  maxPlayers: number;
+  maxPlayers!: number;
 
   @Column({ nullable: true })
-  currentTurnPlayerId: number;
+  currentTurnPlayerId!: number;
+
+  @Column({ default: 1 })
+  currentRound!: number;
 
   @OneToMany(() => Player, (player) => player.game)
-  players: Player[];
+  players!: Player[];
 
   @OneToMany(() => GameRound, (round) => round.game)
-  rounds: GameRound[];
+  rounds!: GameRound[];
 
   @CreateDateColumn()
-  createdAt: Date;
+  createdAt!: Date;
 
   @UpdateDateColumn()
-  updatedAt: Date;
+  updatedAt!: Date;
 }

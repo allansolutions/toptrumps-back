@@ -1,5 +1,5 @@
 import { DataSource } from 'typeorm';
-import { Card } from '../cards/entities/card.entity';
+import { Card } from '@cards/entities/card.entity';
 import { cardsSeedData } from './seeds/cards.seed';
 
 const AppDataSource = new DataSource({
@@ -11,16 +11,16 @@ const AppDataSource = new DataSource({
 
 async function seed() {
   try {
-    console.log('🌱 Iniciando seed de la base de datos...');
+    console.warn('🌱 Iniciando seed de la base de datos...');
 
     await AppDataSource.initialize();
-    console.log('✅ Conexión a la base de datos establecida');
+    console.warn('✅ Conexión a la base de datos establecida');
 
     const cardRepository = AppDataSource.getRepository(Card);
 
     // Limpiar datos existentes
     await cardRepository.clear();
-    console.log('🗑️  Datos anteriores eliminados');
+    console.warn('🗑️  Datos anteriores eliminados');
 
     // Insertar cartas
     for (const cardData of cardsSeedData) {
@@ -28,8 +28,8 @@ async function seed() {
       await cardRepository.save(card);
     }
 
-    console.log(`✅ ${cardsSeedData.length} cartas insertadas correctamente`);
-    console.log('🎉 Seed completado exitosamente');
+    console.warn(`✅ ${cardsSeedData.length} cartas insertadas correctamente`);
+    console.warn('🎉 Seed completado exitosamente');
 
     await AppDataSource.destroy();
   } catch (error) {
@@ -38,4 +38,4 @@ async function seed() {
   }
 }
 
-seed();
+void seed();

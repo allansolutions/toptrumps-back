@@ -5,8 +5,8 @@ import { GameController } from './game.controller';
 import { GameGateway } from './game.gateway';
 import { Game } from './entities/game.entity';
 import { GameRound } from './entities/game-round.entity';
-import { PlayersModule } from '../players/players.module';
-import { CardsModule } from '../cards/cards.module';
+import { PlayersModule } from '@players/players.module';
+import { CardsModule } from '@cards/cards.module';
 
 @Module({
   imports: [
