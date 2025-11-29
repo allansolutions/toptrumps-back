@@ -57,12 +57,6 @@ export class PlayersService {
     return await this.playersRepository.save(player);
   }
 
-  async updateScore(id: number, score: number): Promise<Player> {
-    const player = await this.findOne(id);
-    player.score = score;
-    return await this.playersRepository.save(player);
-  }
-
   async setReady(id: number, isReady: boolean): Promise<Player> {
     const player = await this.findOne(id);
     player.isReady = isReady;

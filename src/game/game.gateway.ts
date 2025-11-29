@@ -145,19 +145,58 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
         playCardDto.selectedAttribute,
       );
 
-      // Emitir resultado de ronda a todos
-      this.server.to(`game-${playCardDto.gameId}`).emit('roundResult', {
-        playedCards: result.roundResult.playedCards,
-        winnerId: result.roundResult.winnerId,
-        nextTurnPlayerId: result.nextTurnPlayerId,
-        selectedAttribute: playCardDto.selectedAttribute,
-      });
+      // Si hay empate, emitir evento especial
+      if (result.roundResult.isTie) {
+        const game = await this.gameService.findOne(playCardDto.gameId);
+        const updatedPlayers = await this.playersService.findByGameId(
+          playCardDto.gameId,
+        );
 
-      // Si terminó la partida
-      if (result.gameFinished) {
-        this.server.to(`game-${playCardDto.gameId}`).emit('gameFinished', {
-          winnerId: result.finalWinnerId,
+        this.server.to(`game-${playCardDto.gameId}`).emit('roundTied', {
+          playedCards: result.roundResult.playedCards,
+          tiedValue: result.roundResult.playedCards[0].value,
+          stakeCount: game.stakeCards?.length || 0,
+          nextTurnPlayerId: result.nextTurnPlayerId,
+          selectedAttribute: playCardDto.selectedAttribute,
         });
+
+        // Si terminó la partida por empate
+        if (result.gameFinished) {
+          this.server.to(`game-${playCardDto.gameId}`).emit('gameFinished', {
+            winnerId: result.finalWinnerId,
+            reason: 'last_standing',
+            players: updatedPlayers,
+          });
+        }
+      } else {
+        // Emitir resultado de ronda normal
+        this.server.to(`game-${playCardDto.gameId}`).emit('roundResult', {
+          playedCards: result.roundResult.playedCards,
+          winnerId: result.roundResult.winnerId,
+          nextTurnPlayerId: result.nextTurnPlayerId,
+          selectedAttribute: playCardDto.selectedAttribute,
+        });
+
+        // Si terminó la partida
+        if (result.gameFinished) {
+          const updatedPlayers = await this.playersService.findByGameId(
+            playCardDto.gameId,
+          );
+          const winner = updatedPlayers.find(
+            (p) => p.id === result.finalWinnerId,
+          );
+
+          this.server.to(`game-${playCardDto.gameId}`).emit('gameFinished', {
+            winnerId: result.finalWinnerId,
+            winnerCardCount: winner?.cards.length || 0,
+            reason:
+              winner?.cards.length ===
+              updatedPlayers.reduce((sum, p) => sum + p.cards.length, 0)
+                ? 'collected_all_cards'
+                : 'last_standing',
+            players: updatedPlayers,
+          });
+        }
       }
 
       return { event: 'cardPlayed', data: { success: true } };

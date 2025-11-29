@@ -39,6 +39,9 @@ export class Game {
   @Column({ default: 1 })
   currentRound!: number;
 
+  @Column('simple-json', { nullable: true, default: () => "'[]'" })
+  stakeCards!: number[];
+
   @OneToMany(() => Player, (player) => player.game)
   players!: Player[];
 

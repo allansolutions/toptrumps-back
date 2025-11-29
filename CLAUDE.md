@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Real-time multiplayer Top Trumps game backend built with NestJS, TypeORM, SQLite, and Socket.IO. The game supports 2-player matches where players compare card attributes in turn-based rounds.
+Real-time multiplayer Top Trumps game backend built with NestJS, TypeORM, SQLite, and Socket.IO. Follows **official Top Trumps rules**: players compare card attributes, the winner collects all played cards, and victory goes to whoever collects all cards in the game.
 
 ## Essential Commands
 
@@ -72,20 +72,31 @@ The application follows NestJS modular architecture with three core modules:
 
 3. **PlayersModule** (`src/players/`)
    - Manages player entities and their state
-   - Tracks player cards, scores, and ready status
+   - Tracks player cards and ready status
    - Handles socket connections for real-time updates
 
-### Key Game Flow
+### Key Game Flow (Official Top Trumps Rules)
 
 The game logic follows this critical sequence (src/game/game.service.ts):
 
-1. **Game Creation**: A player creates a game (max 2 players)
-2. **Player Join**: Second player joins via gameId
-3. **Ready State**: Both players mark themselves ready
-4. **Auto-Start**: When all ready, system distributes 10 random cards to each player (game.service.ts:57-80)
-5. **Round Play**: Current player selects card + attribute; opponent plays random card (game.service.ts:83-165)
-6. **Card Comparison**: Attributes are compared, winner gets +1 score, both cards discarded
-7. **Game End**: When either player runs out of cards, highest score wins
+1. **Game Creation**: A player creates a game (supports 2-6 players)
+2. **Player Join**: Additional players join via gameId
+3. **Ready State**: All players mark themselves ready
+4. **Auto-Start**: When all ready, system distributes cards EQUITABLY with limits:
+   - 2 players: 12 cards each (24 total)
+   - 3 players: 8 cards each (24 total)
+   - 4 players: 6 cards each (24 total)
+   - 5 players: 5 cards each (25 total - uses full deck)
+   - 6+ players: 4 cards each
+   - Remaining cards stay out of play (game.service.ts:85-134)
+5. **Round Play**: Current player selects card + attribute; other players play random cards (game.service.ts:230-448)
+6. **Card Comparison**:
+   - Winner (highest value) collects ALL played cards
+   - In case of tie: cards go to "stake" pile, same player chooses next attribute
+   - Winner of next round gets stake + new cards
+7. **Turn System**: Winner of each round chooses the next attribute (not rotation)
+8. **Game End**: When only one player has cards remaining, or one player has collected all cards
+9. **Victory**: The last player with cards wins
 
 ### WebSocket Events Architecture
 
@@ -104,8 +115,9 @@ The GameGateway (src/game/game.gateway.ts) implements bidirectional communicatio
 - `playerJoined`: Player successfully joined
 - `playerReady`: Ready status update
 - `gameStarted`: Game begins with distributed cards
-- `roundResult`: Round outcome with winner and cards
-- `gameFinished`: Game ended with final winner
+- `roundResult`: Round outcome with winner and cards (normal round)
+- `roundTied`: Round ended in a tie, cards added to stake
+- `gameFinished`: Game ended with final winner (includes reason: 'collected_all_cards' or 'last_standing')
 - `playerDisconnected`: Player left or disconnected
 - `error`: Operation failure
 
@@ -119,17 +131,27 @@ All game events are broadcast to room `game-${gameId}` for real-time sync.
 - Relations: Game → Players (OneToMany), Game → GameRounds (OneToMany)
 
 **Critical Entities:**
-- `Game`: Tracks status, winnerId, currentTurnPlayerId
-- `Player`: Stores cards as number array, score, socketId, isReady
-- `GameRound`: Historical record of each round played
+- `Game`: Tracks status, winnerId, currentTurnPlayerId, stakeCards (cards in tie)
+- `Player`: Stores cards as number array, socketId, isReady
+- `GameRound`: Historical record of each round played (winnerId=0 indicates tie)
 - `Card`: Predefined cards with 5 numeric attributes (0-100) + rarity
 
 ### State Management
 
-Player cards are stored as JSON arrays of card IDs in Player entity. When cards are played:
+Player cards are stored as JSON arrays of card IDs in Player entity. Card transfers work as follows:
+
+**Normal Round (Winner Determined):**
 1. Card IDs are validated against player's card array
-2. After round, both cards are removed from respective arrays
-3. Arrays are persisted back to database (game.service.ts:146-149)
+2. Winner receives ALL played cards + any staked cards
+3. Losers lose only their played card
+4. Winner's array updated with new cards (game.service.ts:369-378)
+5. Turn passes to winner (game.service.ts:391-396)
+
+**Tie Round:**
+1. ALL played cards go to game's stakeCards array
+2. Cards removed from all players
+3. Turn remains with same player (game.service.ts:292-312)
+4. Next winner gets stake + new cards
 
 Game state transitions are enforced:
 - Only WAITING games accept joins
@@ -146,10 +168,16 @@ Environment variables (.env):
 
 ## Important Implementation Notes
 
-- **Opponent AI**: Currently plays random cards (game.service.ts:108-109) - can be enhanced
-- **Turn System**: First player to join gets first turn; alternates after each round
-- **Win Condition**: Player with most points when either runs out of cards
-- **Socket Cleanup**: Disconnected players are marked as not ready; game continues if opponent remains
-- **Card Distribution**: 10 cards per player from random selection of available cards (game.service.ts:66-76)
+- **Official Rules**: Implements authentic Top Trumps gameplay - winner collects cards, no points system
+- **Opponent AI**: Non-active players play random cards (game.service.ts:270-273) - can be enhanced
+- **Turn System**: First player to join gets first turn; then winner of each round chooses next attribute
+- **Win Condition**: Last player with cards, or player who collects all cards in the game
+- **Tie Handling**: Multiple players with same value → cards go to stake, same player chooses again (game.service.ts:292-364)
+- **Socket Cleanup**: Disconnected players are marked as not ready; if <2 players remain, game ends
+- **Card Distribution**: Equitable distribution with limits based on player count (game.service.ts:85-134)
+  - 2 players: 12 cards each, 3 players: 8 each, 4 players: 6 each, 5 players: 5 each, 6+: 4 each
+  - All players receive EXACTLY the same number of cards (no +1 for some players)
+  - Remaining cards stay out of play to ensure fairness
+- **Stake System**: Tied cards accumulate in game.stakeCards, won by next round's winner
 - **TypeScript Config**: Uses `nodenext` module resolution, decorators enabled
 - **Attribute Validation**: Five valid attributes - power, speed, intelligence, defense, agility

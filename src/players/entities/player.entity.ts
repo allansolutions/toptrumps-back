@@ -22,9 +22,6 @@ export class Player {
   @Column({ type: 'simple-json', nullable: true })
   cards!: number[]; // Array de IDs de cartas
 
-  @Column({ default: 0 })
-  score!: number;
-
   @Column({ default: false })
   isReady!: boolean;
 
